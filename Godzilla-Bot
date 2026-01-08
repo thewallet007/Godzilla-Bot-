@@ -1,0 +1,48 @@
+from flask import Flask, request
+import requests, time, hmac, hashlib
+
+app = Flask(__name__)
+
+API_KEY = "mx0vgl4e8IP5Q2AqQb"
+API_SECRET = "6c836c8202dc4abc96454360b68d2e17"
+BASE = "https://contract.mexc.com"
+
+def sign(params):
+    query = '&'.join([f"{k}={params[k]}" for k in sorted(params)])
+    return hmac.new(API_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    d = request.json
+    symbol = d['symbol']
+    side = d['side']
+    qty = d['qty']
+
+    price = float(requests.get(f"{BASE}/api/v1/contract/index_price/{symbol}").json()['data']['price'])
+
+    atr = price * 0.002
+    sl = price - atr*1.2 if side=="BUY" else price + atr*1.2
+    tp = price + atr*2.4 if side=="BUY" else price - atr*2.4
+
+    params = {
+        "symbol": symbol,
+        "price": 0,
+        "vol": qty,
+        "side": 1 if side=="BUY" else 3,
+        "type": 1,
+        "openType": 2,
+        "leverage": 5,
+        "externalOid": str(int(time.time()*1000)),
+        "stopLossPrice": round(sl,2),
+        "takeProfitPrice": round(tp,2),
+        "timestamp": int(time.time()*1000)
+    }
+
+    params["sign"] = sign(params)
+    return requests.post(
+        f"{BASE}/api/v1/private/order/submit",
+        params=params,
+        headers={"ApiKey": API_KEY}
+    ).text
+
+app.run(host="0.0.0.0", port=8000)
